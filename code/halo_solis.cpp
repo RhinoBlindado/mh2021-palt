@@ -269,7 +269,6 @@ void popSelectionGen(const pop &population, vector<cromosome> &parentPop, bestCr
     {
         fighterA = rng(predicts);
         fighterB = rng(predicts);
-
         if (population.genePool[fighterA].getFitness() < population.genePool[fighterB].getFitness())
         {
             parentPop[i] = population.genePool[fighterA];
@@ -586,11 +585,7 @@ int AGG(pop &population, int dim, int popType)
         {
             // Humanity
             case 0:
-
-   //                 cout << "BLX" << endl;
                 BLX_Alpha(parentPop, bestCrom);
-
-     //               cout << "NUM" << endl;
                 nonUniformMutation(parentPop, bestCrom, evaluations, 250*dim);
             break;
 
@@ -607,14 +602,14 @@ int AGG(pop &population, int dim, int popType)
             break;
         }
   //      if(dim == 30)
-  //          cout << "REPLACEMENT OPERATOR" << endl;
+         //   cout << "REPLACEMENT OPERATOR" << endl;
         replacePopGen(population, parentPop, bestCrom);
 
         prevFitness = population.bestIndividual.second;
 
         evaluations += evalPop(population);
 
-   //     cout << "MEJOR GEN ES " << population.bestIndividual.first << " CON FITNESS " << population.bestIndividual.second << endl;
+     //   cout << "MEJOR GEN ES " << population.bestIndividual.first << " CON FITNESS " << population.bestIndividual.second << endl;
 
         if (prevFitness <= population.bestIndividual.second)
         {
@@ -709,13 +704,115 @@ void popAdvantage(pop &mainPop, pop &primaryPop, pop &secondaryPop)
     
 }
 
+// SOLIS WETS FUNCTIONS
+
+void clip(vector<double> &sol, int lower, int upper) {
+  for (auto &val : sol) {
+    if (val < lower) {
+      val = lower;
+    }
+    else if (val > upper) {
+      val = upper;
+    }
+  }
+}
+
+void increm_bias(vector<double> &bias, vector<double> dif) {
+  for (unsigned i = 0; i < bias.size(); i++) {
+    bias[i] = 0.2*bias[i]+0.4*(dif[i]+bias[i]);
+  }
+}
+
+void decrement_bias(vector<double> &bias, vector<double> dif) {
+  for (unsigned i = 0; i < bias.size(); i++) {
+    bias[i] = bias[i]-0.4*(dif[i]+bias[i]);
+  }
+}
+
+/**
+ * Aplica el Solis Wets
+ *
+ * @param  sol solucion a mejorar.
+ * @param fitness fitness de la solución.
+ */
+template <class Random>
+void soliswets(vector<double> &sol, double &fitness, double delta, int maxevals, int lower, int upper, Random &random) {
+    const size_t dim = sol.size();
+    vector<double> bias (dim), dif (dim), newsol (dim);
+    double newfit;
+    size_t i;
+
+    int evals = 0;
+    int num_success = 0;
+    int num_failed = 0;
+
+    while (evals < maxevals) {
+        std::uniform_real_distribution<double> distribution(0.0, delta);
+
+        for (i = 0; i < dim; i++) {
+        dif[i] = distribution(random);
+        newsol[i] = sol[i] + dif[i] + bias[i];
+        }
+
+        clip(newsol, lower, upper);
+        newfit = cec17_fitness(&newsol[0]);
+        evals += 1;
+
+        if (newfit < fitness) {
+        sol = newsol;
+        fitness = newfit;
+        increm_bias(bias, dif);
+        num_success += 1;
+        num_failed = 0;
+        }
+        else if (evals < maxevals) {
+
+        for (i = 0; i < dim; i++) {
+            newsol[i] = sol[i] - dif[i] - bias[i];
+        }
+
+        clip(newsol, lower, upper);
+        newfit = cec17_fitness(&newsol[0]);
+        evals += 1;
+
+        if (newfit < fitness) {
+            sol = newsol;
+            fitness = newfit;
+            decrement_bias(bias, dif);
+            num_success += 1;
+            num_failed = 0;
+        }
+        else {
+            for (i = 0; i < dim; i++) {
+            bias[i] /= 2;
+            }
+
+            num_success = 0;
+            num_failed += 1;
+        }
+        }
+
+        if (num_success >= 5) {
+        num_success = 0;
+        delta *= 2;
+        }
+        else if (num_failed >= 3) {
+        num_failed = 0;
+        delta /= 2;
+        }
+    }
+}
+
+
 void halo(int dim)
 {
     int evaluations = 0,
         years = 0,
-        popSize = 30;
+        popSize = 20;
 
-    double bestOverallFitness;
+    double bestOverallFitness, auxFitness;
+
+    vector<double> auxGenes;
 
     pop humanity, 
         theCovenant, 
@@ -770,6 +867,44 @@ void halo(int dim)
                 }
             }
            // cout << "WAR END" << endl;
+            auxGenes = humanity.genePool[humanity.bestIndividual.first].getGenes();
+            auxFitness = humanity.bestIndividual.second;
+            
+            soliswets(auxGenes, auxFitness, 0.2, 150 * dim , -100, 100, predicts);
+
+            if (auxFitness < humanity.bestIndividual.second)
+            {
+                humanity.genePool[humanity.bestIndividual.first].setGenes(auxGenes);
+                humanity.genePool[humanity.bestIndividual.first].setFitness(auxFitness);
+                humanity.genePool[humanity.bestIndividual.first].setChanges(false);
+                humanity.bestIndividual.second = auxFitness;
+            }
+
+            auxGenes = theCovenant.genePool[theCovenant.bestIndividual.first].getGenes();
+            auxFitness = theCovenant.bestIndividual.second;
+            
+            soliswets(auxGenes, auxFitness, 0.2, 150 * dim, -100, 100, predicts);
+
+            if (auxFitness < theCovenant.bestIndividual.second)
+            {
+                theCovenant.genePool[theCovenant.bestIndividual.first].setGenes(auxGenes);
+                theCovenant.genePool[theCovenant.bestIndividual.first].setFitness(auxFitness);
+                theCovenant.genePool[theCovenant.bestIndividual.first].setChanges(false);
+                theCovenant.bestIndividual.second = auxFitness;
+            }
+
+            auxGenes = theFlood.genePool[theFlood.bestIndividual.first].getGenes();
+            auxFitness = theFlood.bestIndividual.second;
+            
+            soliswets(auxGenes, auxFitness, 0.2, 150 * dim, -100, 100, predicts);
+
+            if (auxFitness < theFlood.bestIndividual.second)
+            {
+                theFlood.genePool[theFlood.bestIndividual.first].setGenes(auxGenes);
+                theFlood.genePool[theFlood.bestIndividual.first].setFitness(auxFitness);
+                theFlood.genePool[theFlood.bestIndividual.first].setChanges(false);
+                theFlood.bestIndividual.second = auxFitness;
+            }
         }
         years++;
 
@@ -794,7 +929,7 @@ int main()
     vector<int> dimension = {10, 30};
 
     // Start the main loop.
-    cout << "-- Halo Genetic Algorithm --" << endl;
+    cout << "-- Halo x Solis Wets Memetic Algorithm --" << endl;
 
     for (int i = 0; i < dimension.size(); i++)
     {
@@ -805,7 +940,7 @@ int main()
             for (int k = 0; k < 10; k++)
             {
                 cout << "\t Execution [" << k + 1 << "/10]...\n";
-                cec17_init("Halo", funcid, dimension[i]);
+                cec17_init("HaloSolis", funcid, dimension[i]);
                 halo(dimension[i]);
             }
         }
